@@ -1,0 +1,148 @@
+\documentclass[a4paper,10pt]{article}
+
+% Including necessary packages for mathematical typesetting
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+% Configuring fonts (using standard LaTeX fonts to avoid fontspec)
+\usepackage{mathptmx} % Times-based math font
+\usepackage{helvet}   % Helvetica for sans-serif
+\usepackage[T1]{fontenc}
+
+\begin{document}
+
+\title{Multiplicative Extended Kalman Filter for Quaternion-Based Orientation Estimation}
+\author{}
+\date{}
+\maketitle
+
+\section{Introduction}
+This document describes the mathematical formulation of a Multiplicative Extended Kalman Filter (MEKF) for estimating the orientation (as a quaternion) and angular velocity of a system, assuming a constant angular velocity model. The filter processes noisy quaternion measurements from a vision-based pose estimation algorithm.
+
+\section{State Representation}
+The state vector consists of:
+\begin{itemize}
+    \item A unit quaternion $\mathbf{r} = [r_w, r_x, r_y, r_z]^T \in \mathbb{R}^4$, representing orientation, with the constraint $\mathbf{r}^T \mathbf{r} = 1$.
+    \item An angular velocity $\boldsymbol{\omega} = [\omega_x, \omega_y, \omega_z]^T \in \mathbb{R}^3$.
+\end{itemize}
+The error state is defined as:
+\[
+\delta \mathbf{x} = \begin{bmatrix} \delta \boldsymbol{\theta} \\ \delta \boldsymbol{\omega} \end{bmatrix} \in \mathbb{R}^6,
+\]
+where $\delta \boldsymbol{\theta} \in \mathbb{R}^3$ is the attitude error (small rotation vector) and $\delta \boldsymbol{\omega} \in \mathbb{R}^3$ is the angular velocity error.
+
+\section{Quaternion Kinematics}
+The quaternion kinematics are given by:
+\[
+\dot{\mathbf{r}} = \frac{1}{2} \Omega(\boldsymbol{\omega}) \mathbf{r},
+\]
+where $\Omega(\boldsymbol{\omega})$ is the skew-symmetric matrix:
+\[
+\Omega(\boldsymbol{\omega}) = \begin{bmatrix}
+0 & -\omega_x & -\omega_y & -\omega_z \\
+\omega_x & 0 & \omega_z & -\omega_y \\
+\omega_y & -\omega_z & 0 & \omega_x \\
+\omega_z & \omega_y & -\omega_x & 0
+\end{bmatrix}.
+\]
+
+\subsection{Quaternion Exponential Propagation}
+For discrete-time propagation over a time step $\Delta t$, the quaternion is updated using the quaternion exponential:
+\[
+\mathbf{r}_{k+1} = \mathbf{q}\left( \frac{\Delta t}{2} \boldsymbol{\omega} \right) \otimes \mathbf{r}_k,
+\]
+where $\mathbf{q}(\mathbf{v})$ is the quaternion exponential of a rotation vector $\mathbf{v} = [v_x, v_y, v_z]^T$:
+\[
+\mathbf{q}(\mathbf{v}) = \begin{bmatrix} \cos(\|\mathbf{v}\|) \\ \frac{\mathbf{v}}{\|\mathbf{v}\|} \sin(\|\mathbf{v}\|) \end{bmatrix}, \quad \text{if } \|\mathbf{v}\| \neq 0,
+\]
+and $\mathbf{q}(\mathbf{0}) = [1, 0, 0, 0]^T$. The quaternion product $\otimes$ is defined as:
+\[
+\mathbf{q}_1 \otimes \mathbf{q}_2 = L(\mathbf{q}_1) \mathbf{q}_2,
+\]
+where $L(\mathbf{q}_1)$ is the left quaternion multiplication matrix:
+\[
+L(\mathbf{q}_1) = \begin{bmatrix}
+q_w & -q_x & -q_y & -q_z \\
+q_x & q_w & -q_z & q_y \\
+q_y & q_z & q_w & -q_x \\
+q_z & -q_y & q_x & q_w
+\end{bmatrix}.
+\]
+The resulting quaternion is normalized to ensure $\mathbf{r}_{k+1}^T \mathbf{r}_{k+1} = 1$.
+
+\section{Error-State Dynamics}
+The error state dynamics are derived from the quaternion error $\delta \mathbf{r} = \mathbf{r}_{\text{true}} \otimes \mathbf{r}_{\text{est}}^{-1}$, approximated for small angles as:
+\[
+\delta \mathbf{r} \approx \begin{bmatrix} 1 \\ \frac{1}{2} \delta \boldsymbol{\theta} \end{bmatrix}.
+\]
+The continuous-time error dynamics are:
+\[
+\dot{\delta \mathbf{x}} = \begin{bmatrix} \dot{\delta \boldsymbol{\theta}} \\ \dot{\delta \boldsymbol{\omega}} \end{bmatrix} = \begin{bmatrix} -\lfloor \boldsymbol{\omega} \rfloor \delta \boldsymbol{\theta} \\ \mathbf{0} \end{bmatrix} + \begin{bmatrix} \mathbf{w}_{\theta} \\ \mathbf{w}_{\omega} \end{bmatrix},
+\]
+where $\lfloor \boldsymbol{\omega} \rfloor$ is the skew-symmetric matrix of $\boldsymbol{\omega}$:
+\[
+\lfloor \boldsymbol{\omega} \rfloor = \begin{bmatrix}
+0 & -\omega_z & \omega_y \\
+\omega_z & 0 & -\omega_x \\
+-\omega_y & \omega_x & 0
+\end{bmatrix},
+\]
+and $\mathbf{w}_{\theta}, \mathbf{w}_{\omega}$ are process noise terms with covariance:
+\[
+\mathbb{E}[\mathbf{w} \mathbf{w}^T] = \mathbf{Q} = \begin{bmatrix} \mathbf{Q}_{\theta} & \mathbf{0} \\ \mathbf{0} & \mathbf{Q}_{\omega} \end{bmatrix}.
+\]
+
+The discrete-time state transition matrix is:
+\[
+\Phi = \mathbf{I} + \mathbf{F} \Delta t, \quad \mathbf{F} = \begin{bmatrix} -\lfloor \boldsymbol{\omega} \rfloor & \mathbf{0} \\ \mathbf{0} & \mathbf{0} \end{bmatrix}.
+\]
+The covariance is propagated as:
+\[
+\mathbf{P}_{k+1} = \Phi \mathbf{P}_k \Phi^T + \mathbf{Q} \Delta t,
+\]
+where $\mathbf{Q}$ is the continuous-time process noise covariance, scaled by $\Delta t$.
+
+\section{Measurement Update}
+The measurement is a noisy quaternion $\mathbf{r}_{\text{meas}}$, with the residual:
+\[
+\delta \mathbf{r} = \mathbf{r}_{\text{meas}} \otimes \mathbf{r}_{\text{est}}^{-1} \approx \begin{bmatrix} 1 \\ \frac{1}{2} \delta \boldsymbol{\theta} \end{bmatrix}.
+\]
+The measurement model is:
+\[
+\mathbf{z} = \delta \boldsymbol{\theta} + \mathbf{v}, \quad \mathbf{v} \sim \mathcal{N}(\mathbf{0}, \mathbf{R}),
+\]
+with measurement matrix:
+\[
+\mathbf{H} = \begin{bmatrix} \mathbf{I}_{3 \times 3} & \mathbf{0}_{3 \times 3} \end{bmatrix}.
+\]
+The Kalman gain is:
+\[
+\mathbf{K} = \mathbf{P} \mathbf{H}^T (\mathbf{H} \mathbf{P} \mathbf{H}^T + \mathbf{R})^{-1}.
+\]
+The error state update is:
+\[
+\delta \mathbf{x} = \begin{bmatrix} \delta \boldsymbol{\theta} \\ \delta \boldsymbol{\omega} \end{bmatrix} = \mathbf{K} \mathbf{z}.
+\]
+The quaternion and angular velocity are updated as:
+\[
+\mathbf{r}_{\text{new}} = \mathbf{q}\left( \frac{1}{2} \delta \boldsymbol{\theta} \right) \otimes \mathbf{r}_{\text{est}}, \quad \boldsymbol{\omega}_{\text{new}} = \boldsymbol{\omega}_{\text{est}} + \delta \boldsymbol{\omega}.
+\]
+The covariance is updated using the Joseph form:
+\[
+\mathbf{P}_{\text{new}} = (\mathbf{I} - \mathbf{K} \mathbf{H}) \mathbf{P} (\mathbf{I} - \mathbf{K} \mathbf{H})^T + \mathbf{K} \mathbf{R} \mathbf{K}^T.
+\]
+
+\section{Error State Reset}
+After the update, the error state is reset to zero:
+\[
+\delta \boldsymbol{\theta} \gets \mathbf{0}, \quad \delta \boldsymbol{\omega} \gets \mathbf{0}.
+\]
+This is implicit in the application of corrections to $\mathbf{r}$ and $\boldsymbol{\omega}$, and the covariance update accounts for the reset error state.
+
+\section{Conclusion}
+The MEKF combines quaternion exponential propagation with error-state Kalman filtering to estimate orientation and angular velocity. The use of the quaternion exponential ensures accurate propagation, while scaling the process noise covariance and using the Joseph form covariance update improves numerical stability.
+
+\end{document}
