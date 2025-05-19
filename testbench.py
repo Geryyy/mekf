@@ -92,12 +92,13 @@ def generate_trajectory(num_steps, dt):
 # Run Simulation
 # -------------------------------
 
-def run_testbench(num_runs=10, noise_level=0.05):
+def run_testbench(num_runs=5, noise_level=0.05):
     # Simulation parameters
     num_steps = 1000
     dt = 0.01
     outlier_prob = 0.05
     outlier_scale = 5.0
+    window_size = 100  # For running mean
 
     # Create output directory
     output_dir = "mekf_test_results"
@@ -126,8 +127,8 @@ def run_testbench(num_runs=10, noise_level=0.05):
 
         # Initialize filter
         r_init = noisy_signal[0].copy()
-        P_init = np.diag([0.01, 0.01, 0.01, 1.0, 1.0, 1.0])  # Higher P for omega
-        Q = np.diag([1e-4, 1e-4, 1e-4, 5e-1, 5e-1, 5e-1])  # Increased Q for omega
+        P_init = np.diag([0.01, 0.01, 0.01, 2.0, 2.0, 2.0])  # Higher P for omega
+        Q = np.diag([1e-4, 1e-4, 1e-4, 1.0, 1.0, 1.0])  # Increased Q for omega
         R = np.eye(3) * (noise_level ** 2)
         filt = MEKF(r_init, omega_init, P_init, Q, R, outlier_threshold=7.81)
 
@@ -169,8 +170,27 @@ def run_testbench(num_runs=10, noise_level=0.05):
         omega_error = np.linalg.norm(ground_truth_omega - filter_omega, axis=1)
         per_axis_errors = ground_truth_omega - filter_omega
 
-        # Compute correlation coefficients
-        correlations = [np.corrcoef(ground_truth_omega[:, i], filter_omega[:, i])[0, 1] for i in range(3)]
+        # Compute running mean errors
+        running_means = np.zeros_like(per_axis_errors)
+        for i in range(num_steps):
+            start = max(0, i - window_size + 1)
+            running_means[i] = np.mean(per_axis_errors[start:i + 1], axis=0)
+
+        # Compute correlations over time windows
+        window_steps = 200
+        num_windows = num_steps // window_steps
+        correlations = np.zeros((num_windows, 3))
+        window_times = []
+        for w in range(num_windows):
+            start = w * window_steps
+            end = min((w + 1) * window_steps, num_steps)
+            window_times.append(times[start])
+            for i in range(3):
+                corr = np.corrcoef(
+                    ground_truth_omega[start:end, i],
+                    filter_omega[start:end, i]
+                )[0, 1]
+                correlations[w, i] = corr if not np.isnan(corr) else 0.0
 
         all_filter_errors.append(filter_error)
         all_omega_errors.append(omega_error)
@@ -188,7 +208,7 @@ def run_testbench(num_runs=10, noise_level=0.05):
         log_file.write(
             f"  Per-axis max errors (wx, wy, wz): {[np.max(np.abs(per_axis_errors[:, i])) for i in range(3)]}\n")
         log_file.write(f"  Per-axis std errors (wx, wy, wz): {[np.std(per_axis_errors[:, i]) for i in range(3)]}\n")
-        log_file.write(f"  Omega correlations (wx, wy, wz): {correlations}\n")
+        log_file.write(f"  Final correlations (wx, wy, wz): {correlations[-1]}\n")
         log_file.write(f"  Outliers detected: {np.sum(mahalanobis_distances > 7.81)}\n")
         log_file.write(f"  Mean P_theta_omega norm: {np.mean(p_theta_omega):.2e}\n")
         log_file.write(f"  Mean Kalman gain norm for omega: {np.mean(kalman_gain_norms):.2e}\n")
@@ -199,7 +219,16 @@ def run_testbench(num_runs=10, noise_level=0.05):
     mean_omega_error = np.mean(all_omega_errors, axis=0)
     mean_filter_omega = np.mean(all_filter_omegas, axis=0)
     mean_kalman_gains = np.mean(all_kalman_gains, axis=0)
-    mean_correlations = [np.corrcoef(ground_truth_omega[:, i], mean_filter_omega[:, i])[0, 1] for i in range(3)]
+    mean_correlations = np.zeros((num_windows, 3))
+    for w in range(num_windows):
+        start = w * window_steps
+        end = min((w + 1) * window_steps, num_steps)
+        for i in range(3):
+            corr = np.corrcoef(
+                ground_truth_omega[start:end, i],
+                mean_filter_omega[start:end, i]
+            )[0, 1]
+            mean_correlations[w, i] = corr if not np.isnan(corr) else 0.0
 
     plt.figure(figsize=(15, 18))
 
@@ -244,16 +273,17 @@ def run_testbench(num_runs=10, noise_level=0.05):
     plt.xlabel('Time (s)')
     plt.legend()
     plt.grid(True)
-    plt.title(f'Angular Velocity Components (Corr: {mean_correlations})')
+    plt.title(f'Angular Velocity Components (Final Corr: {mean_correlations[-1]})')
 
     plt.subplot(5, 2, 6)
     for i, label in enumerate(['wx', 'wy', 'wz']):
         plt.plot(times, ground_truth_omega[:, i] - mean_filter_omega[:, i], label=f'Error {label}')
+        plt.plot(times, running_means[:, i], label=f'Running Mean {label}', linewidth=2)
     plt.ylabel('Angular Velocity Error (rad/s)')
     plt.xlabel('Time (s)')
     plt.legend()
     plt.grid(True)
-    plt.title('Per-Axis Angular Velocity Errors')
+    plt.title('Per-Axis Angular Velocity Errors and Running Means')
 
     plt.subplot(5, 2, 7)
     plt.plot(times, mahalanobis_distances, label='Mahalanobis Distance')
@@ -272,16 +302,26 @@ def run_testbench(num_runs=10, noise_level=0.05):
     plt.grid(True)
     plt.title('Kalman Gain Norm for Omega')
 
+    plt.subplot(5, 2, 9)
+    for i, label in enumerate(['wx', 'wy', 'wz']):
+        plt.plot(window_times, mean_correlations[:, i], label=f'Corr {label}')
+    plt.ylabel('Correlation Coefficient')
+    plt.xlabel('Time (s)')
+    plt.legend()
+    plt.grid(True)
+    plt.title('Omega Correlations Over Time')
+
     plt.tight_layout()
     plt.savefig(f"{output_dir}/mekf_performance_noise_{noise_level:.2f}.png")
     plt.close()
 
     np.savetxt(f"{output_dir}/errors_noise_{noise_level:.2f}.txt",
-               np.column_stack((times, noisy_error, mean_filter_error, mean_omega_error, filter_cov, p_theta_omega,
-                                mean_kalman_gains)),
-               header="Time Noisy_Error_deg Filter_Error_deg Omega_Error_rad/s Cov_Trace P_theta_omega_norm Kalman_Gain_Norm",
+               np.column_stack((times, noisy_error, mean_filter_error, mean_omega_error,
+                                running_means[:, 0], running_means[:, 1], running_means[:, 2],
+                                filter_cov, p_theta_omega, mean_kalman_gains)),
+               header="Time Noisy_Error_deg Filter_Error_deg Omega_Error_rad/s Running_Mean_wx Running_Mean_wy Running_Mean_wz Cov_Trace P_theta_omega_norm Kalman_Gain_Norm",
                fmt="%.6f")
 
 
 if __name__ == "__main__":
-    run_testbench(num_runs=10, noise_level=0.05)
+    run_testbench(num_runs=5, noise_level=0.05)

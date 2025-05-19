@@ -96,7 +96,7 @@ class MEKF:
         F = np.zeros((6, 6))
         F[0:3, 0:3] = -skew(self.omega)
         F[0:3, 3:6] = np.eye(3)
-        F[3:6, 3:6] = -0.05 * np.eye(3)  # Reduced damping for faster omega changes
+        F[3:6, 3:6] = -0.01 * np.eye(3)  # Reduced damping for faster omega changes
         Phi = np.eye(6) + F * dt
         self.P = Phi @ self.P @ Phi.T + self.Q * dt
         self.P = (self.P + self.P.T) / 2
