@@ -1,0 +1,252 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{enumitem}
+\usepackage{noto}
+
+\begin{document}
+
+\section{Mathematical Formulation of the Multiplicative Extended Kalman Filter}
+\label{sec:mekf_math}
+
+This section provides a rigorous mathematical formulation of the Multiplicative Extended Kalman Filter (MEKF) used for simultaneous attitude and angular velocity estimation of a rigid body, based on noisy quaternion measurements from visual pose estimation. The MEKF leverages a quaternion representation for attitude and a random walk model for angular velocity, with an error-state approach to maintain quaternion unit norm constraints.
+
+\subsection{State Definition}
+The state vector comprises a unit quaternion representing the attitude and the angular velocity:
+\[
+\mathbf{x} = \begin{bmatrix} \mathbf{q} \\ \boldsymbol{\omega} \end{bmatrix},
+\]
+where:
+\begin{itemize}
+    \item \(\mathbf{q} = [q_w, q_x, q_y, q_z]^T \in \mathbb{R}^4\) is the unit quaternion (\(\|\mathbf{q}\|_2 = 1\)) describing the rotation from the body frame to the inertial frame.
+    \item \(\boldsymbol{\omega} = [\omega_x, \omega_y, \omega_z]^T \in \mathbb{R}^3\) is the angular velocity in the body frame (rad/s).
+\end{itemize}
+The quaternion follows the convention \(q_w\) as the scalar component, with \(\mathbf{q}_v = [q_x, q_y, q_z]^T\) as the vector part.
+
+\subsection{Process Model}
+The process model describes the continuous-time dynamics of the state.
+
+\subsubsection{Quaternion Kinematics}
+The quaternion evolves according to the kinematic equation:
+\[
+\dot{\mathbf{q}}(t) = \frac{1}{2} \Omega(\boldsymbol{\omega}(t)) \mathbf{q}(t),
+\]
+where \(\Omega(\boldsymbol{\omega})\) is the quaternion rate matrix:
+\[
+\Omega(\boldsymbol{\omega}) = \begin{bmatrix}
+0 & -\omega_x & -\omega_y & -\omega_z \\
+\omega_x & 0 & \omega_z & -\omega_y \\
+\omega_y & -\omega_z & 0 & \omega_x \\
+\omega_z & \omega_y & -\omega_x & 0
+\end{bmatrix}.
+\]
+In discrete time with step size \(\Delta t\), the quaternion is propagated approximately as:
+\[
+\mathbf{q}_{k+1} = \mathbf{q}_k \otimes \exp\left(\frac{1}{2} \boldsymbol{\omega}_k \Delta t\right),
+\]
+where \(\otimes\) denotes quaternion multiplication, and the exponential map for a small rotation vector \(\mathbf{v} \in \mathbb{R}^3\) is:
+\[
+\exp(\mathbf{v}) = \begin{bmatrix} \cos(\|\mathbf{v}\|) \\ \frac{\mathbf{v}}{\|\mathbf{v}\|} \sin(\|\mathbf{v}\|) \end{bmatrix}, \quad \text{if } \|\mathbf{v}\| > 0,
+\]
+or \(\exp(\mathbf{0}) = [1, 0, 0, 0]^T\). The quaternion is normalized after propagation to ensure \(\|\mathbf{q}_{k+1}\|_2 = 1\).
+
+\subsubsection{Angular Velocity Dynamics}
+The angular velocity is modeled as a damped random walk:
+\[
+\dot{\boldsymbol{\omega}}(t) = -\alpha \boldsymbol{\omega}(t) + \mathbf{w}_{\omega}(t),
+\]
+where \(\alpha \geq 0\) is the damping factor (s\(^{-1}\)), and \(\mathbf{w}_{\omega}(t) \in \mathbb{R}^3\) is zero-mean Gaussian process noise with covariance:
+\[
+\mathbb{E}[\mathbf{w}_{\omega}(t) \mathbf{w}_{\omega}^T(\tau)] = \mathbf{Q}_{\omega} \delta(t - \tau).
+\]
+In discrete time, this becomes:
+\[
+\boldsymbol{\omega}_{k+1} = e^{-\alpha \Delta t} \boldsymbol{\omega}_k + \mathbf{w}_{\omega,k},
+\]
+where \(\mathbf{w}_{\omega,k} \sim \mathcal{N}(\mathbf{0}, \mathbf{Q}_{\omega} \Delta t)\).
+
+\subsubsection{Error State}
+To handle the quaternion’s unit norm constraint, the MEKF uses an error-state vector:
+\[
+\delta \mathbf{x} = \begin{bmatrix} \delta \boldsymbol{\theta} \\ \delta \boldsymbol{\omega} \end{bmatrix} \in \mathbb{R}^6,
+\]
+where:
+\begin{itemize}
+    \item \(\delta \boldsymbol{\theta} \in \mathbb{R}^3\) is the small-angle rotation vector representing the error quaternion \(\delta \mathbf{q} \approx [1, \frac{1}{2} \delta \boldsymbol{\theta}^T]^T\), such that \(\mathbf{q}_{\text{true}} = \delta \mathbf{q} \otimes \mathbf{q}_{\text{est}}\).
+    \item \(\delta \boldsymbol{\omega} = \boldsymbol{\omega}_{\text{true}} - \boldsymbol{\omega}_{\text{est}} \in \mathbb{R}^3\) is the angular velocity error.
+\end{itemize}
+The error-state dynamics are linearized as:
+\[
+\dot{\delta \mathbf{x}}(t) = \mathbf{F}(t) \delta \mathbf{x}(t) + \mathbf{w}(t),
+\]
+where the state transition matrix is:
+\[
+\mathbf{F}(t) = \begin{bmatrix}
+-[\boldsymbol{\omega}(t)]_{\times} & \mathbf{I}_{3 \times 3} \\
+\mathbf{0}_{3 \times 3} & -\alpha \mathbf{I}_{3 \times 3}
+\end{bmatrix},
+\]
+with \([\boldsymbol{\omega}]_{\times}\) the skew-symmetric matrix of \(\boldsymbol{\omega}\):
+\[
+[\boldsymbol{\omega}]_{\times} = \begin{bmatrix}
+0 & -\omega_z & \omega_y \\
+\omega_z & 0 & -\omega_x \\
+-\omega_y & \omega_x & 0
+\end{bmatrix},
+\]
+and \(\mathbf{w}(t) = [ \mathbf{w}_{\theta}^T, \mathbf{w}_{\omega}^T ]^T\) is process noise with covariance:
+\[
+\mathbf{Q} = \begin{bmatrix}
+\mathbf{Q}_{\theta} & \mathbf{0}_{3 \times 3} \\
+\mathbf{0}_{3 \times 3} & \mathbf{Q}_{\omega}
+\end{bmatrix}.
+\]
+The discrete-time transition matrix is approximated as:
+\[
+\boldsymbol{\Phi}_k = \mathbf{I}_{6 \times 6} + \mathbf{F}_k \Delta t.
+\]
+
+\subsection{Measurement Model}
+The measurement is a noisy quaternion from visual pose estimation:
+\[
+\mathbf{q}_{\text{meas},k} = \delta \mathbf{q}_{\text{meas},k} \otimes \mathbf{q}_{\text{true},k},
+\]
+where \(\delta \mathbf{q}_{\text{meas},k} \approx [1, \frac{1}{2} \mathbf{v}_k^T]^T\), and \(\mathbf{v}_k \sim \mathcal{N}(\mathbf{0}, \mathbf{R})\) is the measurement noise in the rotation vector space, with covariance \(\mathbf{R} \in \mathbb{R}^{3 \times 3}\). The measurement residual is the error quaternion:
+\[
+\delta \mathbf{q}_k = \mathbf{q}_{\text{meas},k} \otimes \mathbf{q}_{\text{est},k}^{-1} \approx \begin{bmatrix} 1 \\ \frac{1}{2} \delta \boldsymbol{\theta}_k \end{bmatrix},
+\]
+yielding the measurement vector:
+\[
+\mathbf{z}_k = \delta \boldsymbol{\theta}_k \approx 2 [\delta \mathbf{q}_k]_v,
+\]
+where \([\delta \mathbf{q}_k]_v\) is the vector part of \(\delta \mathbf{q}_k\). The measurement model is:
+\[
+\mathbf{z}_k = \mathbf{H} \delta \mathbf{x}_k + \mathbf{v}_k,
+\]
+with:
+\[
+\mathbf{H} = \begin{bmatrix} \mathbf{I}_{3 \times 3} & \mathbf{0}_{3 \times 3} \end{bmatrix},
+\]
+and \(\mathbf{v}_k \sim \mathcal{N}(\mathbf{0}, \mathbf{R})\).
+
+\subsection{MEKF Algorithm}
+The MEKF operates in two phases: propagation and update.
+
+\subsubsection{Propagation}
+The nominal state is propagated as:
+\[
+\mathbf{q}_{k+1|k} = \mathbf{q}_{k|k} \otimes \exp\left(\frac{1}{2} \boldsymbol{\omega}_{k|k} \Delta t\right),
+\]
+\[
+\boldsymbol{\omega}_{k+1|k} = e^{-\alpha \Delta t} \boldsymbol{\omega}_{k|k},
+\]
+with \(\mathbf{q}_{k+1|k}\) normalized. The error-state covariance is propagated:
+\[
+\mathbf{P}_{k+1|k} = \boldsymbol{\Phi}_k \mathbf{P}_{k|k} \boldsymbol{\Phi}_k^T + \mathbf{Q} \Delta t,
+\]
+and symmetrized: \(\mathbf{P}_{k+1|k} = \frac{1}{2} (\mathbf{P}_{k+1|k} + \mathbf{P}_{k+1|k}^T)\).
+
+\subsubsection{Update}
+Given a measurement \(\mathbf{q}_{\text{meas},k}\), compute the residual:
+\[
+\delta \mathbf{q}_k = \mathbf{q}_{\text{meas},k} \otimes \mathbf{q}_{k|k-1}^{-1}, \quad \mathbf{z}_k = 2 [\delta \mathbf{q}_k]_v.
+\]
+Perform outlier rejection using the Mahalanobis distance:
+\[
+d_k = \mathbf{z}_k^T \mathbf{S}_k^{-1} \mathbf{z}_k,
+\]
+where \(\mathbf{S}_k = \mathbf{H} \mathbf{P}_{k|k-1} \mathbf{H}^T + \mathbf{R}\). If \(d_k > \chi^2_{3, 0.95} \approx 7.81\), skip the update. Otherwise, compute the Kalman gain:
+\[
+\mathbf{K}_k = \mathbf{P}_{k|k-1} \mathbf{H}^T \mathbf{S}_k^{-1},
+\]
+and update the error state:
+\[
+\delta \mathbf{x}_{k|k} = \mathbf{K}_k \mathbf{z}_k = \begin{bmatrix} \delta \boldsymbol{\theta}_{k|k} \\ \delta \boldsymbol{\omega}_{k|k} \end{bmatrix}.
+\]
+Update the nominal state:
+\[
+\mathbf{q}_{k|k} = \begin{bmatrix} 1 \\ \frac{1}{2} \delta \boldsymbol{\theta}_{k|k} \end{bmatrix} \otimes \mathbf{q}_{k|k-1}, \quad \mathbf{q}_{k|k} \leftarrow \frac{\mathbf{q}_{k|k}}{\|\mathbf{q}_{k|k}\|_2},
+\]
+\[
+\boldsymbol{\omega}_{k|k} = \boldsymbol{\omega}_{k|k-1} + \delta \boldsymbol{\omega}_{k|k}.
+\]
+Update the covariance:
+\[
+\mathbf{P}_{k|k} = (\mathbf{I}_{6 \times 6} - \mathbf{K}_k \mathbf{H}) \mathbf{P}_{k|k-1} (\mathbf{I}_{6 \times 6} - \mathbf{K}_k \mathbf{H})^T + \mathbf{K}_k \mathbf{R} \mathbf{K}_k^T,
+\]
+and symmetrize: \(\mathbf{P}_{k|k} = \frac{1}{2} (\mathbf{P}_{k|k} + \mathbf{P}_{k|k}^T)\).
+
+\section{Filter Tuning}
+\label{sec:filter_tuning}
+
+The MEKF was tuned to estimate the attitude and angular velocity of a rigid body with time-varying angular velocity, based on noisy quaternion measurements from visual pose estimation. The testbench simulates sinusoidal angular velocities:
+\[
+\boldsymbol{\omega}(t) = \begin{bmatrix}
+0.5 \sin(0.2 t) \\
+0.3 \cos(0.15 t + 0.5) \\
+0.2 \sin(0.3 t + 1.0)
+\end{bmatrix} \text{ rad/s},
+\]
+with measurement noise standard deviation of 0.05 rad and 5\% outlier probability (scaled by 5). Initial tuning yielded good attitude estimation (mean error < 5 degrees) but high per-axis angular velocity errors (up to 1 rad/s). A convergence test with fading angular velocity (\(\boldsymbol{\omega}(t) \to 0\)) confirmed the filter’s ability to converge, indicating that the errors were due to suboptimal tuning for dynamic conditions. The tuning process focused on reducing per-axis angular velocity errors to <0.2 rad/s while maintaining attitude accuracy.
+
+\subsection{Initial Covariance Tuning}
+The initial error-state covariance reflects uncertainty in the attitude and angular velocity estimates:
+\[
+\mathbf{P}_0 = \text{diag}(0.01, 0.01, 0.01, 1.0, 1.0, 1.0).
+\]
+The attitude components (\(\delta \boldsymbol{\theta}\)) were initialized with a variance of 0.01 rad\(^2\) (~\(5.7^\circ\)), matching the expected initial quaternion error. The angular velocity components (\(\delta \boldsymbol{\omega}\)) used 1.0 rad\(^2\)/s\(^2\), reflecting high uncertainty due to the noisy initial estimate derived from differencing quaternion measurements. To improve initial convergence, the angular velocity variance was increased to:
+\[
+\mathbf{P}_0 = \text{diag}(0.01, 0.01, 0.01, 2.0, 2.0, 2.0),
+\]
+allowing larger initial corrections and reducing early errors.
+
+\subsection{Process Noise Tuning}
+The process noise covariance accounts for unmodeled dynamics:
+\[
+\mathbf{Q} = \text{diag}(q_{\theta}, q_{\theta}, q_{\theta}, q_{\omega}, q_{\omega}, q_{\omega}).
+\]
+Initially, \(q_{\theta} = 10^{-4}\) rad\(^2\)/s and \(q_{\omega} = 0.2\) rad\(^2\)/s\(^3\) were used. The small \(q_{\theta}\) ensured stable attitude propagation, as the quaternion kinematics are well-modeled. However, the angular velocity’s sinusoidal variations (accelerations up to ~0.15 rad/s\(^2\)) required a higher \(q_{\omega}\). After testing, \(q_{\omega}\) was increased to:
+\[
+q_{\omega} = 1.0 \text{ rad}^2/\text{s}^3,
+\]
+enabling the filter to track rapid changes, reducing per-axis errors and improving correlations (>0.9).
+
+\subsection{Measurement Noise Tuning}
+The measurement noise covariance was set based on the quaternion noise standard deviation (\(\sigma = 0.05\) rad):
+\[
+\mathbf{R} = \sigma^2 \mathbf{I}_{3 \times 3} = 0.0025 \mathbf{I}_{3 \times 3} \text{ rad}^2.
+\]
+This was found adequate, as the attitude error remained <5 degrees. Outlier rejection using a \(\chi^2\) threshold of 7.81 (3 DoF, 95\% confidence) mitigated large measurement errors (5\% outliers scaled by 5).
+
+\subsection{Damping Factor Tuning}
+The angular velocity’s random walk model included a damping factor:
+\[
+\dot{\boldsymbol{\omega}}(t) = -\alpha \boldsymbol{\omega}(t) + \mathbf{w}_{\omega}(t).
+\]
+Initially, \(\alpha = 0.1\) s\(^{-1}\) assumed slow angular velocity changes, but the testbench’s frequencies (up to 0.3 rad/s) required a less restrictive model. The damping was reduced to:
+\[
+\alpha = 0.01 \text{ s}^{-1},
+\]
+allowing faster variations, which improved tracking without introducing drift.
+
+\subsection{Diagnostics and Performance}
+The tuning was validated using Monte Carlo simulations (\(N=5\)) with the testbench. Key metrics included:
+\begin{itemize}
+    \item \textbf{Attitude Error}: Mean error <5 degrees, compared to ~2.86 degrees for noisy measurements.
+    \item \textbf{Angular Velocity Error}: Per-axis max errors targeted <0.2 rad/s, mean errors <0.05 rad/s.
+    \item \textbf{Correlations}: Per-axis correlations between true and estimated \(\boldsymbol{\omega}\) targeted >0.9.
+    \item \textbf{Kalman Gain}: Mean norm of \(\mathbf{K}[3:6, :]\) > \(10^{-3}\), ensuring \(\delta \boldsymbol{\omega}\) updates.
+    \item \textbf{Outliers}: <5\% of measurements rejected.
+\end{itemize}
+Running mean errors and time-windowed correlations were monitored to assess tracking stability. If errors exceeded targets, axis-specific \(\mathbf{Q}\) adjustments (e.g., \(q_{\omega,x} = 1.5\) for \(\omega_x\)) were considered, given \(\omega_x\)’s higher amplitude (0.5 rad/s).
+
+\subsection{Future Tuning Considerations}
+If errors remain above 0.2 rad/s, further tuning may involve:
+\begin{itemize}
+    \item Increasing \(q_{\omega}\) to 2.0 rad\(^2\)/s\(^3\) or removing damping (\(\alpha = 0\)).
+    \item Testing with real visual pose estimation data to match actual dynamics.
+    \item Extending the state to include angular acceleration, modeling \(\dot{\boldsymbol{\omega}}\) as a random walk.
+\end{itemize}
+
+\end{document}
