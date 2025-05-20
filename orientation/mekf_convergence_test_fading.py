@@ -90,7 +90,7 @@ def generate_trajectory(num_steps, dt):
 # Convergence Test with Fading Angular Velocity
 # -------------------------------
 
-def run_convergence_test(num_steps=10000, dt=0.01, noise_level=0.05):
+def run_convergence_test(num_steps=10000, dt=0.01, noise_level=0.01):
     # Simulation parameters
     outlier_prob = 0.05
     outlier_scale = 5.0
@@ -112,7 +112,7 @@ def run_convergence_test(num_steps=10000, dt=0.01, noise_level=0.05):
     r_init = noisy_signal[0].copy()
     omega_init = estimate_initial_omega(noisy_signal, dt, num_samples=5)
     P_init = np.diag([0.01, 0.01, 0.01, 1.0, 1.0, 1.0])
-    Q = np.diag([1e-4, 1e-4, 1e-4, 5e-1, 5e-1, 5e-1])
+    Q = np.diag([1e-2, 1e-2, 1e-2, 1e0, 1e0, 1e0])
     R = np.eye(3) * (noise_level ** 2)
     filt = MEKF(r_init, omega_init, P_init, Q, R, outlier_threshold=7.81)
 
